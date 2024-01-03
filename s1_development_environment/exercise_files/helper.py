@@ -22,6 +22,7 @@ def imshow(image, ax=None, title=None, normalize=True):
     ax.tick_params(axis="both", length=0)
     ax.set_xticklabels("")
     ax.set_yticklabels("")
+    plt.savefig(ax)
 
     return ax
 
