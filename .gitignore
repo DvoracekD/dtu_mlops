@@ -157,3 +157,7 @@ latest_info.csv
 latest_repo_data.csv
 repo_data.csv
 student_repos/
+*.pt
+*.pth
+*.png
+wandb/
