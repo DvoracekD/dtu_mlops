@@ -12,6 +12,7 @@ from torchvision.utils import save_image
 
 from torch.profiler import profile, ProfilerActivity
 from torch.profiler import profile, tensorboard_trace_handler
+import wandb
 
 # Model Hyperparameters
 dataset_path = "datasets"
@@ -22,7 +23,7 @@ x_dim = 784
 hidden_dim = 400
 latent_dim = 20
 lr = 1e-3
-epochs = 1
+epochs = 10
 
 
 # Data loading
@@ -102,13 +103,23 @@ class Model(nn.Module):
         x_hat = self.decoder(z)
 
         return x_hat, mean, log_var
+    
+wandb.init(
+    # Set the project where this run will be logged
+    project="vae_mnist",
+    # Track hyperparameters and run metadata
+    config={
+        "learning_rate": lr,
+        "epochs": epochs,
+    },
+)
 
 
 encoder = Encoder(input_dim=x_dim, hidden_dim=hidden_dim, latent_dim=latent_dim)
 decoder = Decoder(latent_dim=latent_dim, hidden_dim=hidden_dim, output_dim=x_dim)
 
 model = Model(encoder=encoder, decoder=decoder).to(DEVICE)
-
+wandb.watch(model, log_freq=100)
 
 BCE_loss = nn.BCELoss()
 
@@ -122,36 +133,35 @@ def loss_function(x, x_hat, mean, log_var):
 
 optimizer = Adam(model.parameters(), lr=lr)
 
+print("Start training VAE...")
+model.train()
+for epoch in range(epochs):
+    overall_loss = 0
+    for batch_idx, (x, _) in enumerate(train_loader):
+        if batch_idx % 100 == 0:
+            print(batch_idx)
+        x = x.view(batch_size, x_dim)
+        x = x.to(DEVICE)
 
-with profile(activities=[ProfilerActivity.CPU], record_shapes=True, profile_memory=True,
-             on_trace_ready=tensorboard_trace_handler("./log/mnist")) as prof:
-    print("Start training VAE...")
-    model.train()
-    for epoch in range(epochs):
-        overall_loss = 0
-        for batch_idx, (x, _) in enumerate(train_loader):
-            if batch_idx % 100 == 0:
-                print(batch_idx)
-            x = x.view(batch_size, x_dim)
-            x = x.to(DEVICE)
+        optimizer.zero_grad()
 
-            optimizer.zero_grad()
+        x_hat, mean, log_var = model(x)
+        loss = loss_function(x, x_hat, mean, log_var)
 
-            x_hat, mean, log_var = model(x)
-            loss = loss_function(x, x_hat, mean, log_var)
+        overall_loss += loss.item()
+        wandb.log({"loss": loss.item()})
 
-            overall_loss += loss.item()
-
-            loss.backward()
-            optimizer.step()
-        print(
-            "\tEpoch",
-            epoch + 1,
-            "complete!",
-            "\tAverage Loss: ",
-            overall_loss / (batch_idx * batch_size),
-        )
-    print("Finish!!")
+        loss.backward()
+        optimizer.step()
+    wandb.log({"average_loss": overall_loss / (batch_idx * batch_size)})
+    print(
+        "\tEpoch",
+        epoch + 1,
+        "complete!",
+        "\tAverage Loss: ",
+        overall_loss / (batch_idx * batch_size),
+    )
+print("Finish!!")
 
 # Generate reconstructions
 model.eval()
@@ -165,7 +175,9 @@ with torch.no_grad():
         break
 
 save_image(x.view(batch_size, 1, 28, 28), "orig_data.png")
+wandb.log({"orig_data": [wandb.Image(im) for im in x.view(batch_size, 1, 28, 28)]})
 save_image(x_hat.view(batch_size, 1, 28, 28), "reconstructions.png")
+wandb.log({"reconstructions": [wandb.Image(im) for im in x_hat.view(batch_size, 1, 28, 28)]})
 
 # Generate samples
 with torch.no_grad():
@@ -173,3 +185,4 @@ with torch.no_grad():
     generated_images = decoder(noise)
 
 save_image(generated_images.view(batch_size, 1, 28, 28), "generated_sample.png")
+wandb.log({"generated_sample": [wandb.Image(im) for im in generated_images.view(batch_size, 1, 28, 28)]})
